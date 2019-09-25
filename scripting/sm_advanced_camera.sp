@@ -3,7 +3,7 @@
 #include <sourcemod>
 #include <sdktools>
 
-#define PLUGIN_VERSION	"1.0.1"
+#define PLUGIN_VERSION	"1.0.2"
 #define PLUGIN_DESC	"Allows a client to setup to camera their world model."
 #define PLUGIN_NAME	"[ANY] Advanced Camera"
 #define PLUGIN_AUTH	"Glubbable"
@@ -32,6 +32,20 @@ public void OnPluginStart()
 	RegAdminCmd("sm_ac_pos", Command_CameraPos, ADMFLAG_GENERIC, "Quick Position Setup for Advanced Camera.");
 	RegAdminCmd("sm_ac_ang", Command_CameraAng, ADMFLAG_GENERIC, "Quick Angle Setup for Advanced Camera.");
 	RegAdminCmd("sm_ac_track", Command_CameraTrack, ADMFLAG_GENERIC, "Quick Track Setup for Advanced Camera.");
+	
+	for (int iClient = MaxClients; iClient > 0; iClient--)
+		OnClientPutInServer(iClient); // Force set values on late load.
+}
+
+public void OnPluginEnd()
+{
+	for (int iClient = MaxClients; iClient > 0; iClient--)
+	{
+		if (!IsClientInGame(iClient))
+			continue;
+		
+		OnClientDisconnect(iClient); // Force set values on late load.
+	}
 }
 
 const AC_Client AC_INVALID_CLIENT = view_as<AC_Client>(0);
@@ -48,7 +62,11 @@ methodmap AC_Client __nullable__
 	{
 		public get()
 		{
-			return EntRefToEntIndex(g_iClientCameraRef[this.iIndex]);
+			int iEntity = EntRefToEntIndex(g_iClientCameraRef[this.iIndex]);
+			if (!IsValidEntity(iEntity)) // Failsafe.
+				iEntity = INVALID_ENT_REFERENCE;
+			
+			return iEntity;
 		}
 		public set(int iEntity)
 		{
@@ -120,6 +138,10 @@ methodmap AC_Client __nullable__
 		for (int i = 0; i < 3; i++)
 			vecBuffer[i] = g_flClientCameraAng[this.iIndex][i];
 	}
+	public void ToggleThirdPerson(bool bState)
+	{
+		SetEntProp(this.iIndex, Prop_Send, "m_nForceTauntCam", bState);
+	}
 	
 	public void DisplayCameraMenu()
 	{
@@ -166,7 +188,6 @@ methodmap AC_Client __nullable__
 		
 		mMenu.Display(this.iIndex, MENU_TIME_FOREVER);
 		this.mCurrentMenu = mMenu;
-		this.SendMessage("[SM] You can use 'sm_ac_pos' for faster re-setup.");
 	}
 	public void DisplayCameraAngleMenu()
 	{
@@ -191,7 +212,6 @@ methodmap AC_Client __nullable__
 		
 		mMenu.Display(this.iIndex, MENU_TIME_FOREVER);
 		this.mCurrentMenu = mMenu;
-		this.SendMessage("[SM] You can use 'sm_ac_ang' for faster re-setup.");
 	}
 	public void DisplayCameraTrackMenu()
 	{
@@ -201,7 +221,7 @@ methodmap AC_Client __nullable__
 		
 		char sValue[16];
 		bool bTracking = this.bCameraTrack;
-		Format(sValue, sizeof(sValue), "Tracking: %s", bTracking ? "Enabled" : "Disabled");
+		Format(sValue, sizeof(sValue), "Track: %s", bTracking ? "On" : "Off");
 		mMenu.AddItem("x", sValue, ITEMDRAW_DISABLED);
 		mMenu.AddItem("x", " ------------ ", ITEMDRAW_DISABLED);
 		
@@ -210,7 +230,6 @@ methodmap AC_Client __nullable__
 		
 		mMenu.Display(this.iIndex, MENU_TIME_FOREVER);
 		this.mCurrentMenu = mMenu;
-		this.SendMessage("[SM] You can use 'sm_ac_track' for faster re-setup.");
 	}
 	
 	public void ParentCamera(int iEntity = INVALID_ENT_REFERENCE, bool bParent = true)
@@ -220,7 +239,7 @@ methodmap AC_Client __nullable__
 		
 		if (iEntity != INVALID_ENT_REFERENCE)
 		{
-			if (bParent)
+			/*if (bParent)
 			{
 				SetVariantString("!activator");
 				AcceptEntityInput(iEntity, "SetParent", this.iIndex);
@@ -228,7 +247,7 @@ methodmap AC_Client __nullable__
 			else
 			{
 				AcceptEntityInput(iEntity, "ClearParent");
-			}
+			}*/
 		}
 	}
 	public void MoveCamera(int iEntity = INVALID_ENT_REFERENCE)
@@ -246,9 +265,8 @@ methodmap AC_Client __nullable__
 			this.GetCameraPos(vecPosAdd);
 			this.GetCameraAng(vecAngAdd);
 			
-			VectorTransform(vecPosAdd, vecPos, vecAng, vecPos);
+			AddVectors(vecPos, vecPosAdd, vecPos);
 			AddVectors(vecAng, vecAngAdd, vecAng);
-			NormalizeVector(vecAng, vecAng);
 			
 			TeleportEntity(iEntity, vecPos, vecAng, NULL_VECTOR);
 		}
@@ -267,13 +285,14 @@ methodmap AC_Client __nullable__
 					DispatchKeyValue(iEntity, "target", sBuffer);
 			}
 			
-			DispatchKeyValue(iEntity, "spawnflags", bTrack ? "3" : "1"); // 3 = Spawn at & track player
+			DispatchKeyValue(iEntity, "spawnflags", bTrack ? "2" : "0");
 			DispatchSpawn(iEntity); // Spawn in Camera.
+			AcceptEntityInput(iEntity, "Enable", this.iIndex);
 			
-			SetEntPropEnt(iEntity, Prop_Data, "m_hOwnerEntity", this.iIndex);
-			
+			this.ToggleThirdPerson(true);
 			this.MoveCamera(iEntity);
 			this.ParentCamera(iEntity);
+			this.iCamera = iEntity;
 		}
 	}
 	public void RemoveCamera(int iEntity = INVALID_ENT_REFERENCE)
@@ -284,13 +303,13 @@ methodmap AC_Client __nullable__
 		if (iEntity != INVALID_ENT_REFERENCE)
 		{
 			AcceptEntityInput(iEntity, "Disable"); // Free the Client.
-			AcceptEntityInput(iEntity, "ClearParent"); // Safely unparent the Camera.
 			RemoveEntity(iEntity); // Kill the Camera.
 			
 			if (this.CheckClient())
 			{
 				int iClient = this.iIndex;
 				SetClientViewEntity(iClient, iClient); // Reset Camera View to avoid bugs.
+				this.ToggleThirdPerson(false);
 			}
 		}
 	}
@@ -300,7 +319,7 @@ public void OnClientPutInServer(int iClient)
 {
 	g_iClientCameraRef[iClient] = INVALID_ENT_REFERENCE;
 	g_bClientCameraTrack[iClient] = false;
-	g_flClientCameraPos[iClient] = view_as<float>({128.0, 0.0, 64.0});
+	g_flClientCameraPos[iClient] = view_as<float>({0.0, 0.0, 0.0});
 	g_flClientCameraAng[iClient] = view_as<float>({0.0, 180.0, 0.0});
 	g_mClientCurrentMenu[iClient] = null;
 }
@@ -571,8 +590,15 @@ public int Menu_CameraTrack(Menu mMenu, MenuAction mSelection, int iParam1, int 
 			char sResult[12];
 			mMenu.GetItem(iParam2, sResult, sizeof(sResult));
 			
-			Client.RemoveCamera(Client.iCamera);
-			Client.SpawnCamera();
+			bool bTrack = view_as<bool>(StringToInt(sResult));
+			Client.bCameraTrack = bTrack;
+			
+			int iEntity = Client.iCamera;
+			if (iEntity != INVALID_ENT_REFERENCE)
+			{
+				Client.RemoveCamera();
+				Client.SpawnCamera();
+			}
 			
 			Client.DisplayCameraTrackMenu();
 		}
