@@ -256,9 +256,19 @@ methodmap AC_Client __nullable__
 		int iEntity = CreateEntityByName("point_viewcontrol");
 		if (iEntity > MaxClients)
 		{
-			SetEntPropEnt(iEntity, Prop_Data, "m_hOwnerEntity", this.iIndex);
-			DispatchKeyValue(iEntity, "spawnflags", this.bCameraTrack ? "3" : "1"); // 3 = Spawn at & track player
+			bool bTrack = this.bCameraTrack;
+			if (bTrack)
+			{
+				char sBuffer[32];
+				GetEntPropString(this.iIndex, Prop_Data, "m_iName", sBuffer, sizeof(sBuffer));
+				if (sBuffer[0])
+					DispatchKeyValue(iEntity, "target", sBuffer);
+			}
+			
+			DispatchKeyValue(iEntity, "spawnflags", bTrack ? "3" : "1"); // 3 = Spawn at & track player
 			DispatchSpawn(iEntity); // Spawn in Camera.
+			
+			SetEntPropEnt(iEntity, Prop_Data, "m_hOwnerEntity", this.iIndex);
 			
 			this.MoveCamera(iEntity);
 			this.ParentCamera(iEntity);
@@ -452,7 +462,7 @@ public int Menu_Camera(Menu mMenu, MenuAction mSelection, int iParam1, int iPara
 	}
 	else if (mSelection == MenuAction_End) 
 	{
-		CameraMenuEnd(mMenu, view_as<bool>(iParam1 == MenuEnd_ExitBack));
+		CameraMenuEnd(mMenu);
 		delete mMenu;
 	}
 }
@@ -552,7 +562,7 @@ public int Menu_CameraTrack(Menu mMenu, MenuAction mSelection, int iParam1, int 
 	}
 }
 
-void CameraMenuEnd(Menu mMenu, bool bBack)
+void CameraMenuEnd(Menu mMenu, bool bBack = false)
 {
 	for (int iClient = MaxClients; iClient > 0; iClient--)
 	{
@@ -562,10 +572,10 @@ void CameraMenuEnd(Menu mMenu, bool bBack)
 		AC_Client Client = new AC_Client(iClient);
 		if (Client.mCurrentMenu == mMenu)
 		{
+			Client.mCurrentMenu = null;
+			
 			if (bBack)
 				Client.DisplayCameraMenu();
-				
-			Client.mCurrentMenu = null;
 			break;
 		}
 	}
