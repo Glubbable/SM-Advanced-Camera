@@ -3,7 +3,7 @@
 #include <sourcemod>
 #include <sdktools>
 
-#define PLUGIN_VERSION	"1.0.0"
+#define PLUGIN_VERSION	"1.0.1"
 #define PLUGIN_DESC	"Allows a client to setup to camera their world model."
 #define PLUGIN_NAME	"[ANY] Advanced Camera"
 #define PLUGIN_AUTH	"Glubbable"
@@ -28,6 +28,7 @@ public void OnPluginStart()
 {
 	RegAdminCmd("sm_ac_menu", Command_CameraMenu, ADMFLAG_GENERIC, "Opens Advanced Camera Menu.");
 	
+	RegAdminCmd("sm_ac_spawn", Command_CameraSpawn, ADMFLAG_GENERIC, "Quick Spawn/Removes Camera for Advanced Camera.");
 	RegAdminCmd("sm_ac_pos", Command_CameraPos, ADMFLAG_GENERIC, "Quick Position Setup for Advanced Camera.");
 	RegAdminCmd("sm_ac_ang", Command_CameraAng, ADMFLAG_GENERIC, "Quick Angle Setup for Advanced Camera.");
 	RegAdminCmd("sm_ac_track", Command_CameraTrack, ADMFLAG_GENERIC, "Quick Track Setup for Advanced Camera.");
@@ -245,8 +246,9 @@ methodmap AC_Client __nullable__
 			this.GetCameraPos(vecPosAdd);
 			this.GetCameraAng(vecAngAdd);
 			
-			AddVectors(vecPos, vecPosAdd, vecPos);
+			VectorTransform(vecPosAdd, vecPos, vecAng, vecPos);
 			AddVectors(vecAng, vecAngAdd, vecAng);
+			NormalizeVector(vecAng, vecAng);
 			
 			TeleportEntity(iEntity, vecPos, vecAng, NULL_VECTOR);
 		}
@@ -298,7 +300,7 @@ public void OnClientPutInServer(int iClient)
 {
 	g_iClientCameraRef[iClient] = INVALID_ENT_REFERENCE;
 	g_bClientCameraTrack[iClient] = false;
-	g_flClientCameraPos[iClient] = view_as<float>({0.0, 0.0, 0.0});
+	g_flClientCameraPos[iClient] = view_as<float>({128.0, 0.0, 64.0});
 	g_flClientCameraAng[iClient] = view_as<float>({0.0, 180.0, 0.0});
 	g_mClientCurrentMenu[iClient] = null;
 }
@@ -320,6 +322,26 @@ public Action Command_CameraMenu(int iClient, int iArgs)
 		return Plugin_Handled;
 	
 	Client.DisplayCameraMenu();
+	return Plugin_Handled;
+}
+
+public Action Command_CameraSpawn(int iClient, int iArgs)
+{
+	AC_Client Client = new AC_Client(iClient);
+	if (!Client.CheckClient())
+		return Plugin_Handled;
+	
+	if (Client.mCurrentMenu != null)
+	{
+		Client.SendMessage("[SM] Error! Advanced Camera is open!");
+		return Plugin_Handled;
+	}
+	
+	if (Client.iCamera != INVALID_ENT_REFERENCE)
+		Client.RemoveCamera();
+	else
+		Client.SpawnCamera();
+	
 	return Plugin_Handled;
 }
 
@@ -579,4 +601,22 @@ void CameraMenuEnd(Menu mMenu, bool bBack = false)
 			break;
 		}
 	}
+}
+
+stock void VectorTransform(const float vecOffSet[3], const float vecPos[3], const float vecAng[3], float vecBuffer[3])
+{
+	float vecFwd[3], vecRight[3], vecUp[3];
+	GetAngleVectors(vecAng, vecFwd, vecRight, vecUp);
+	
+	NormalizeVector(vecFwd, vecFwd);
+	NormalizeVector(vecRight, vecRight);
+	NormalizeVector(vecUp, vecUp);
+	
+	ScaleVector(vecRight, vecOffSet[1]);
+	ScaleVector(vecFwd, vecOffSet[0]);
+	ScaleVector(vecUp, vecOffSet[2]);
+	
+	vecBuffer[0] = vecPos[0] + vecRight[0] + vecFwd[0] + vecUp[0];
+	vecBuffer[1] = vecPos[1] + vecRight[1] + vecFwd[1] + vecUp[1];
+	vecBuffer[2] = vecPos[2] + vecRight[2] + vecFwd[2] + vecUp[2];
 }
