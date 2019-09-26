@@ -3,7 +3,7 @@
 #include <sourcemod>
 #include <sdktools>
 
-#define PLUGIN_VERSION	"1.0.2"
+#define PLUGIN_VERSION	"1.0.3"
 #define PLUGIN_DESC	"Allows a client to setup to camera their world model."
 #define PLUGIN_NAME	"[ANY] Advanced Camera"
 #define PLUGIN_AUTH	"Glubbable"
@@ -150,17 +150,18 @@ methodmap AC_Client __nullable__
 		mMenu.ExitBackButton = false;
 		
 		bool bCamera = view_as<bool>(this.iCamera != INVALID_ENT_REFERENCE);
-		int iDrawFlags1 = bCamera ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT;
-		int iDrawFlags2 = bCamera ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED;
+		mMenu.AddItem("x", " ------------ ", ITEMDRAW_DISABLED);
 		
-		mMenu.AddItem("x", "Camera Options", ITEMDRAW_DISABLED);
+		if (!bCamera)
+			mMenu.AddItem("0", "Spawn Camera");
+		else
+			mMenu.AddItem("1", "Kill Camera");
+		
+		int iDrawFlags = bCamera ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED;
 		mMenu.AddItem("x", " ------------ ", ITEMDRAW_DISABLED);
-		mMenu.AddItem("0", "Spawn Camera", iDrawFlags1);
-		mMenu.AddItem("1", "Kill Camera", iDrawFlags2);
-		mMenu.AddItem("x", " ------------ ", ITEMDRAW_DISABLED);
-		mMenu.AddItem("2", "Camera Position", iDrawFlags2);
-		mMenu.AddItem("3", "Camera Angle", iDrawFlags2);
-		mMenu.AddItem("4", "Camera Track", iDrawFlags2);
+		mMenu.AddItem("2", "Camera Position", iDrawFlags);
+		mMenu.AddItem("3", "Camera Angle", iDrawFlags);
+		mMenu.AddItem("4", "Camera Track", iDrawFlags);
 		
 		mMenu.Display(this.iIndex, MENU_TIME_FOREVER);
 		this.mCurrentMenu = mMenu;
@@ -172,10 +173,6 @@ methodmap AC_Client __nullable__
 		mMenu.ExitBackButton = true;
 		
 		char sValue[32];
-		float vecPos[3];
-		this.GetCameraPos(vecPos);
-		Format(sValue, sizeof(sValue), "X: %.0f Y: %.0f Z: %.0f", vecPos[0], vecPos[1], vecPos[2]);
-		mMenu.AddItem("x", sValue, ITEMDRAW_DISABLED);
 		mMenu.AddItem("x", " ------------ ", ITEMDRAW_DISABLED);
 		
 		mMenu.AddItem("0", "Increase X by 5");
@@ -188,6 +185,11 @@ methodmap AC_Client __nullable__
 		
 		mMenu.Display(this.iIndex, MENU_TIME_FOREVER);
 		this.mCurrentMenu = mMenu;
+		
+		float vecPos[3];
+		this.GetCameraPos(vecPos);
+		Format(sValue, sizeof(sValue), "[SM] Current Values - X: %.0f Y: %.0f Z: %.0f", vecPos[0], vecPos[1], vecPos[2]);
+		this.SendMessage(sValue);
 	}
 	public void DisplayCameraAngleMenu()
 	{
@@ -198,20 +200,21 @@ methodmap AC_Client __nullable__
 		char sValue[32];
 		float vecAng[3];
 		this.GetCameraAng(vecAng);
-		Format(sValue, sizeof(sValue), "Y: %.0f Z: %.0f X: %.0f", vecAng[0], vecAng[1], vecAng[2]);
-		mMenu.AddItem("x", sValue, ITEMDRAW_DISABLED);
 		mMenu.AddItem("x", " ------------ ", ITEMDRAW_DISABLED);
 		
-		mMenu.AddItem("0", "Increase Y by 5");
-		mMenu.AddItem("1", "Increase Z by 5");
-		mMenu.AddItem("2", "Increase X by 5");
+		mMenu.AddItem("0", "Increase Y by 5", 360.0 >= vecAng[0] > 0.0 ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
+		mMenu.AddItem("1", "Increase Z by 5", 360.0 >= vecAng[1] > 0.0 ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
+		mMenu.AddItem("2", "Increase X by 5", 360.0 >= vecAng[2] > 0.0 ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 		
-		mMenu.AddItem("3", "Decrease Y by 5");
-		mMenu.AddItem("4", "Decrease Z by 5");
-		mMenu.AddItem("5", "Decrease X by 5");
+		mMenu.AddItem("3", "Decrease Y by 5", 0.0 < vecAng[0] <= 360.0 ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
+		mMenu.AddItem("4", "Decrease Z by 5", 0.0 < vecAng[1] <= 360.0 ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
+		mMenu.AddItem("5", "Decrease X by 5", 0.0 < vecAng[2] <= 360.0 ? ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED);
 		
 		mMenu.Display(this.iIndex, MENU_TIME_FOREVER);
 		this.mCurrentMenu = mMenu;
+		
+		Format(sValue, sizeof(sValue), "[SM] Current Values - Y: %.0f Z: %.0f X: %.0f", vecAng[0], vecAng[1], vecAng[2]);
+		this.SendMessage(sValue);
 	}
 	public void DisplayCameraTrackMenu()
 	{
@@ -276,23 +279,25 @@ methodmap AC_Client __nullable__
 		int iEntity = CreateEntityByName("point_viewcontrol");
 		if (iEntity > MaxClients)
 		{
+			int iClient = this.iIndex;
 			bool bTrack = this.bCameraTrack;
 			if (bTrack)
 			{
 				char sBuffer[32];
-				GetEntPropString(this.iIndex, Prop_Data, "m_iName", sBuffer, sizeof(sBuffer));
-				if (sBuffer[0])
-					DispatchKeyValue(iEntity, "target", sBuffer);
+				Format(sBuffer, sizeof(sBuffer), "ac_target_%i", iClient);
+				DispatchKeyValue(iClient, "targetname", sBuffer);
+				DispatchKeyValue(iEntity, "target", sBuffer);
 			}
 			
-			DispatchKeyValue(iEntity, "spawnflags", bTrack ? "2" : "0");
+			DispatchKeyValue(iEntity, "spawnflags", "1");
 			DispatchSpawn(iEntity); // Spawn in Camera.
-			AcceptEntityInput(iEntity, "Enable", this.iIndex);
 			
 			this.ToggleThirdPerson(true);
 			this.MoveCamera(iEntity);
 			this.ParentCamera(iEntity);
 			this.iCamera = iEntity;
+			
+			AcceptEntityInput(iEntity, "Enable", iClient);
 		}
 	}
 	public void RemoveCamera(int iEntity = INVALID_ENT_REFERENCE)
@@ -627,22 +632,4 @@ void CameraMenuEnd(Menu mMenu, bool bBack = false)
 			break;
 		}
 	}
-}
-
-stock void VectorTransform(const float vecOffSet[3], const float vecPos[3], const float vecAng[3], float vecBuffer[3])
-{
-	float vecFwd[3], vecRight[3], vecUp[3];
-	GetAngleVectors(vecAng, vecFwd, vecRight, vecUp);
-	
-	NormalizeVector(vecFwd, vecFwd);
-	NormalizeVector(vecRight, vecRight);
-	NormalizeVector(vecUp, vecUp);
-	
-	ScaleVector(vecRight, vecOffSet[1]);
-	ScaleVector(vecFwd, vecOffSet[0]);
-	ScaleVector(vecUp, vecOffSet[2]);
-	
-	vecBuffer[0] = vecPos[0] + vecRight[0] + vecFwd[0] + vecUp[0];
-	vecBuffer[1] = vecPos[1] + vecRight[1] + vecFwd[1] + vecUp[1];
-	vecBuffer[2] = vecPos[2] + vecRight[2] + vecFwd[2] + vecUp[2];
 }
